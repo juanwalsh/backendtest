@@ -1,0 +1,162 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model CasinoUser {
+  id        Int      @id @default(autoincrement())
+  username  String   @unique
+  email     String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+
+  wallet   CasinoWallet?
+  sessions GameSession[]
+
+  @@map("CASINO_USERS")
+}
+
+model CasinoWallet {
+  id                 Int      @id @default(autoincrement())
+  userId             Int      @unique @map("user_id")
+  currencyCode       String   @default("BRL") @map("currency_code")
+  playableBalance    Decimal  @default(0) @map("playable_balance") @db.Decimal(18, 2)
+  redeemableBalance  Decimal  @default(0) @map("redeemable_balance") @db.Decimal(18, 2)
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  user         CasinoUser          @relation(fields: [userId], references: [id])
+  transactions CasinoTransaction[]
+  sessions     GameSession[]
+
+  @@map("CASINO_WALLETS")
+}
+
+model GameProvider {
+  id          Int      @id @default(autoincrement())
+  code        String   @unique
+  name        String
+  apiEndpoint String   @map("api_endpoint")
+  secretKey   String   @map("secret_key")
+  isDisabled  Boolean  @default(false) @map("is_disabled")
+
+  games CasinoGame[]
+
+  @@map("CASINO_GAME_PROVIDERS")
+}
+
+model CasinoGame {
+  id             Int      @id @default(autoincrement())
+  providerId     Int      @map("provider_id")
+  providerGameId String   @map("provider_game_id")
+  isActive       Boolean  @default(true) @map("is_active")
+  minBet         Decimal  @default(1) @map("min_bet") @db.Decimal(18, 2)
+  maxBet         Decimal  @default(10000) @map("max_bet") @db.Decimal(18, 2)
+
+  provider GameProvider  @relation(fields: [providerId], references: [id])
+  sessions GameSession[]
+
+  @@map("CASINO_GAMES")
+}
+
+model GameSession {
+  id                Int      @id @default(autoincrement())
+  token             String   @unique
+  userId            Int      @map("user_id")
+  walletId          Int      @map("wallet_id")
+  gameId            Int      @map("game_id")
+  providerSessionId String?  @map("provider_session_id")
+  isActive          Boolean  @default(true) @map("is_active")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  user         CasinoUser          @relation(fields: [userId], references: [id])
+  wallet       CasinoWallet        @relation(fields: [walletId], references: [id])
+  game         CasinoGame          @relation(fields: [gameId], references: [id])
+  transactions CasinoTransaction[]
+
+  @@map("CASINO_GAME_SESSIONS")
+}
+
+model CasinoTransaction {
+  id                          Int      @id @default(autoincrement())
+  walletId                    Int      @map("wallet_id")
+  sessionId                   Int?     @map("session_id")
+  transactionType             String   @map("transaction_type") // BET, WIN, ROLLBACK
+  amount                      Decimal  @db.Decimal(18, 2)
+  externalTransactionId       String   @unique @map("external_transaction_id")
+  relatedExternalTransactionId String? @map("related_external_transaction_id")
+  balanceAfter                Decimal  @map("balance_after") @db.Decimal(18, 2)
+  responseCache               String?  @map("response_cache") @db.Text
+  createdAt                   DateTime @default(now()) @map("created_at")
+
+  wallet  CasinoWallet  @relation(fields: [walletId], references: [id])
+  session GameSession?  @relation(fields: [sessionId], references: [id])
+
+  @@index([walletId])
+  @@index([sessionId])
+  @@map("CASINO_TRANSACTIONS")
+}
+
+model ProviderGame {
+  id       Int      @id @default(autoincrement())
+  gameId   String   @unique @map("game_id")
+  isActive Boolean  @default(true) @map("is_active")
+  minBet   Decimal  @default(1) @map("min_bet") @db.Decimal(18, 2)
+  maxBet   Decimal  @default(10000) @map("max_bet") @db.Decimal(18, 2)
+
+  rounds GameRound[]
+
+  @@map("PROVIDER_GAMES")
+}
+
+model ProviderCustomer {
+  id             Int      @id @default(autoincrement())
+  playerId       String   @map("player_id")
+  casinoCode     String   @map("casino_code")
+  externalUserId Int      @map("external_user_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  rounds GameRound[]
+
+  @@unique([casinoCode, externalUserId])
+  @@map("PROVIDER_CUSTOMERS")
+}
+
+model GameRound {
+  id               Int       @id @default(autoincrement())
+  roundId          String    @unique @map("round_id")
+  sessionId        String    @map("session_id")
+  playerId         Int       @map("player_id")
+  gameId           Int       @map("game_id")
+  currency         String    @default("BRL")
+  status           String    @default("OPEN") // OPEN, CLOSED
+  totalBetAmount   Decimal   @default(0) @map("total_bet_amount") @db.Decimal(18, 2)
+  totalPayoutAmount Decimal  @default(0) @map("total_payout_amount") @db.Decimal(18, 2)
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  game   ProviderGame     @relation(fields: [gameId], references: [id])
+  player ProviderCustomer @relation(fields: [playerId], references: [id])
+  bets   ProviderBet[]
+
+  @@index([sessionId])
+  @@map("PROVIDER_GAME_ROUNDS")
+}
+
+model ProviderBet {
+  id                 Int      @id @default(autoincrement())
+  transactionId      String   @unique @map("transaction_id")
+  roundId            String   @map("round_id")
+  betType            String   @map("bet_type") // BET, WIN, ROLLBACK
+  amount             Decimal  @db.Decimal(18, 2)
+  casinoBalanceAfter Decimal? @map("casino_balance_after") @db.Decimal(18, 2)
+  status             String   @default("PENDING") // PENDING, CONFIRMED, FAILED
+  responseCache      String?  @map("response_cache") @db.Text
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  round GameRound @relation(fields: [roundId], references: [roundId])
+
+  @@index([roundId])
+  @@map("PROVIDER_BETS")
+}
